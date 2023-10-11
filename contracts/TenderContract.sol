@@ -11,6 +11,7 @@ contract TenderContract {
     address public owner;
     uint256 public revealEndTime;
     mapping(address => Bid) public bids;
+    mapping(address => bool) bidExists;
     address[] public bidders;
 
     /**
@@ -24,12 +25,11 @@ contract TenderContract {
 
     /**
      * @dev Modifier to restrict access to the owner (Mayor).
-     */    
+     */
     modifier onlyOwner() {
         require(msg.sender == owner, "Only the Mayor can perform this action");
         _;
     }
-
 
     /**
      * @dev Commit a bid to the tender.
@@ -38,12 +38,13 @@ contract TenderContract {
     function commitBid(bytes32 commitment) public {
         require(block.timestamp < revealEndTime, "Commit phase has ended");
         bids[msg.sender] = Bid(commitment, 0, false);
-        
-        if (bids[msg.sender].commitment != 0) {
+
+        if (bidExists[msg.sender] != true) {
             bidders.push(msg.sender);
         }
-    }
 
+        bidExists[msg.sender] = true;
+    }
 
     /**
      * @dev Reveal a bid with the actual bid value and salt.
@@ -51,11 +52,16 @@ contract TenderContract {
      * @param salt The salt value used for commitment.
      */
     function revealBid(uint256 bid, bytes32 salt) public {
-        require(block.timestamp >= revealEndTime, "Reveal phase has not started yet");
+        require(
+            block.timestamp >= revealEndTime,
+            "Reveal phase has not started yet"
+        );
         Bid storage bidder = bids[msg.sender];
         require(!bidder.revealed, "Bidder has already revealed");
 
-        bytes32 expectedCommitment = keccak256(abi.encodePacked(bid, salt));
+        bytes32 expectedCommitment = keccak256(
+            abi.encodePacked(bid, salt, msg.sender)
+        );
         require(expectedCommitment == bidder.commitment, "Invalid commitment");
 
         bidder.revealedBid = bid;
@@ -65,13 +71,11 @@ contract TenderContract {
     /**
      * @dev Get bid information for a specific bidder.
      * @param bidder The address of the bidder.
-     * @return commitment The hash commitment of the bidder's bid.
-     * @return revealedBid The revealed bid value.
-     * @return revealed A boolean indicating if the bid has been revealed.
+     * @return Bid
      */
-    function getBidInfo(address bidder) public view returns (bytes32, uint256, bool) {
+    function getBidInfo(address bidder) public view returns (Bid memory) {
         Bid storage bid = bids[bidder];
-        return (bid.commitment, bid.revealedBid, bid.revealed);
+        return bid;
     }
 
     /**
@@ -79,8 +83,11 @@ contract TenderContract {
      * @return smallestBids An array of Bid structs representing the smallest revealed bids.
      */
     function selectWinner() public view onlyOwner returns (Bid[] memory) {
-        require(block.timestamp >= revealEndTime, "Reveal phase has not ended yet");
-    
+        require(
+            block.timestamp >= revealEndTime,
+            "Reveal phase has not ended yet"
+        );
+
         uint256 smallestBid = bids[bidders[0]].revealedBid;
         uint256 count = 0;
 
@@ -107,6 +114,24 @@ contract TenderContract {
         }
 
         return smallestBids;
-        
     }
+
+    function getRevealTimeEnd() public view returns (uint256) {
+        int256 difference = int256(revealEndTime) - int256(block.timestamp);
+        // Check if the difference is negative and return 0 if true
+        if (difference < 0) {
+            return 0;
+        } else {
+            return uint256(difference);
+        }
+    }
+
+    function startRevealPhase() public onlyOwner {
+        revealEndTime = 0;
+    }
+
+    function getCommitment(uint256 bid, bytes32 salt, address bidder) public view onlyOwner returns (bytes32) {
+        return keccak256(abi.encodePacked(bid, salt, bidder));
+    }
+
 }
